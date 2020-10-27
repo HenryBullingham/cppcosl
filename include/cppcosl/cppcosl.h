@@ -11,6 +11,52 @@ This is a header only-library.
 
 use #define CPPCOSL_IMPLEMENTATION in one source file where the compiled library code should be located
 
+USAGE:
+
+Firstly, some things to keep in mind:
+1) you cannot have normal local variables or temporaries in the coroutines, nor will function parameters persist changes 
+    (This is because setjmp & longjmp do not preserve the values of locals/temporaries/parameters that change between calls. 
+     Furthermore, to ensure that setjmp & longjmp work for coroutines, the function is called multiple times, and within itself jumps to the correct position)
+
+
+The structure of a coroutine is as follows:
+
+co_declare(my_coroutine_name) OR
+co_declare_args(my_coroutine_name, _type _name, _type2 _name2 ...) OR
+{
+    //local declarations
+
+    co_begin(); 
+
+    //Coroutine body
+
+    yield_break();
+}
+
+    for local declarations, they can be done ass follows, and will call the appropriate constructor:
+    //Local declarations (as many as you want)
+    co_local<the_type> the_name; OR
+    co_local<the_type> the_name = value; OR
+    co_local<the_type> the_name(value1, value2);
+
+    for the coroutine body, you can have a mix of the normal c++ expressions, and if you want to yield, you can use:
+
+    yield_return(_______)
+
+    yield_call(another_coroutine) OR
+    yield_call(another_coroutine, arg1, arg2, ...)
+
+    yield_break()
+
+    for yield return, call it with the result of a function that returns a co_result. IE
+
+    yield_return(wait_for_seconds(0.5)); OR
+    yield_return(yield())
+
+    yield call is similar.
+
+
+
 */
 #pragma once
 
@@ -20,6 +66,7 @@ use #define CPPCOSL_IMPLEMENTATION in one source file where the compiled library
 #include <csetjmp>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -99,7 +146,7 @@ namespace cppcosl
     template<typename Coroutine, typename ... Args>
     coroutine co_bind(Coroutine func, Args&& ... args)
     {
-        return std::bind(func, std::placeholders::_1, std::placeholders::_2, std::forward<Args...>(args ...));
+        return std::bind(func, std::placeholders::_1, std::placeholders::_2, std::forward<Args>(args)...);
     }
 
     /// <summary>
@@ -185,11 +232,64 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
     cppcosl_ctx.clear_nested();\
 }
 
+    /// <summary>
+/// Yields control of the coroutine to call another coroutine with ARGS
+/// </summary>
+#define yield_call_args(_coroutine, ...)\
+{ \
+    cppcosl::detail::make_context_current(&cppcosl_ctx.get_or_make_nested()); \
+    cppcosl::co_result cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 0, __VA_ARGS__); \
+    while(cppcosl_co_ret.type != cppcosl::detail::co_result_type::Done) \
+    {\
+        yield_return(cppcosl_co_ret);\
+        cppcosl::detail::make_context_current(&cppcosl_ctx.get_or_make_nested()); \
+        cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 1, __VA_ARGS__);\
+    }\
+    cppcosl_ctx.clear_nested();\
+}
+
 /// <summary>
 /// Notifies that the coroutine is done. Must appear at least once in every coroutine, as the final statement
 /// </summary>
 #define yield_break()\
     return cppcosl::detail::done();
+
+    //Library of useful coroutines
+
+    namespace lib
+    {
+        /// <summary>
+        /// Applies the given function to the elements in the sequence. Yields the specified result after each iteration
+        /// </summary>
+        /// <typeparam name="ForwardIterator"></typeparam>
+        /// <typeparam name="Func"></typeparam>
+        /// <param name=""></param>
+        /// <param name="begin"></param>
+        /// <param name="end"></param>
+        /// <param name="func"></param>
+        /// <returns></returns>
+        template<typename ForwardIterator, typename Func>
+        coroutine co_foreach(ForwardIterator begin, ForwardIterator end, Func&& func, co_result yield_result = yield());
+
+        /// <summary>
+        /// Calls the given function every 'period' seconds, for the given number of repetitions.
+        /// If repetitions is 0, this continues indefinitely.
+        /// </summary>
+        /// <typeparam name="Func"></typeparam>
+        /// <param name=""></param>
+        /// <param name="operation"></param>
+        /// <param name="period"></param>
+        /// <param name="repetitions"></param>
+        /// <returns></returns>
+        coroutine co_timer(std::function<void()> func, float period, int repetitions = 0);
+
+    }
+
+    /*
+    
+        Implementation Details
+    
+    */
 
     namespace detail
     {
@@ -361,7 +461,7 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
             }
 
             m_count++;
-            std::shared_ptr<T> ptr = std::make_shared<T>(std::forward<Args...>(args ...));
+            std::shared_ptr<T> ptr = std::make_shared<T>(std::forward<Args>(args)...);
             m_allocations.push_back(ptr);
             return *ptr;
         }
@@ -411,7 +511,7 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
 
 #if defined(CPPCOSL_IMPLEMENTATION)
 
-        static co_context* current_context;
+        static thread_local co_context* current_context;
 
         void make_context_current(co_context* context)
         {
@@ -435,16 +535,30 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
     public:
         co_local();
 
+        co_local(const T& obj);
+
+        template<typename E>
+        co_local(std::initializer_list<E>);
+
         template<typename ... Args>
         co_local(Args&& ... args);
+
+        co_local(const co_local<T>&);
+        co_local(co_local<T>&&);
+        co_local<T>& operator=(const co_local<T>&);
+        co_local<T>& operator=(co_local<T>&&);
 
         operator T& ();
 
         T& operator=(const T&);
-        T& operator=(std::decay_t<T>&& obj);
+        T& operator=(T&& obj);
 
         T* operator->();
         T& operator*();
+
+        auto& operator[](int n);
+
+
     };
 
     template<typename T>
@@ -454,10 +568,48 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
     }
 
     template<typename T>
+    inline co_local<T>::co_local(const T& obj)
+    {
+        m_ptr = &detail::get_current_context()->allocate_or_get<T>(obj);
+    }
+
+    template<typename T>
+    template<typename E>
+    inline co_local<T>::co_local(std::initializer_list<E> lst)
+    {
+        m_ptr = &detail::get_current_context()->allocate_or_get<T>(lst);
+    }
+
+    template<typename T>
     template<typename ... Args>
     inline co_local<T>::co_local(Args&& ... args)
     {
-        m_ptr = &detail::get_current_context()->allocate_or_get<T>(std::forward<Args...>(args...));
+        m_ptr = &detail::get_current_context()->allocate_or_get<T>(std::forward<Args>(args)...);
+    }
+    template<typename T>
+    co_local<T>::co_local(const co_local<T>& other)
+    {
+        *m_ptr = *other.m_ptr;
+    }
+
+    template<typename T>
+    co_local<T>::co_local(co_local<T>&&)
+    {
+        *m_ptr = std::move(*other.m_ptr);
+    }
+
+    template<typename T>
+    co_local<T>& co_local<T>::operator=(const co_local<T>& other)
+    {
+        *m_ptr = *other.m_ptr;
+        return *this;
+    }
+
+    template<typename T>
+    co_local<T>& co_local<T>::operator=(co_local<T>&& other)
+    {
+        *m_ptr = std::move(*other.m_ptr);
+        return *this;
     }
 
     template<typename T>
@@ -470,11 +622,11 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
     inline T& co_local<T>::operator=(const T& obj)
     {
         *m_ptr = obj;
-        return *mptr;
+        return *m_ptr;
     }
 
     template<typename T>
-    inline T& co_local<T>::operator=(std::decay_t<T>&& obj)
+    inline T& co_local<T>::operator=(T&& obj)
     {
         *m_ptr = std::move(obj);
         return *m_ptr;
@@ -490,6 +642,12 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
     inline T& co_local<T>::operator*()
     {
         return *m_ptr;
+    }
+
+    template<typename T>
+    inline auto& co_local<T>::operator[](int n)
+    {
+        return (*m_ptr)[n];
     }
 
     /*
@@ -655,7 +813,6 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
         }
     }
 
-
     std::thread cppcosl_start_thread(std::function<bool()> should_terminate)
     {
         std::thread cppcosl_thread(cppcosl_thread_func, should_terminate);
@@ -667,7 +824,78 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
         while (!handle->done);
     }
 
+
+
 #endif //CPPCOSL_IMPLEMENTATION
+
+    /*
+
+        Useful coroutine library
+
+    */
+
+
+    namespace lib
+    {
+
+        template<typename ForwardIterator, typename Element>
+        co_declare_args(co_foreach_impl, ForwardIterator begin, ForwardIterator end, std::function<void(const Element&)> func, co_result yield_result)
+        {
+            co_local<ForwardIterator> it;
+
+            co_begin();
+
+            for (it = begin; *it != end; (*it)++)
+            {
+                func(**it);
+                yield_return(yield_result);
+            }
+
+            yield_break();
+        }
+
+        template<typename ForwardIterator, typename Func>
+        coroutine co_foreach(ForwardIterator begin, ForwardIterator end, Func&& func, co_result yield_result)
+        {
+            using obj_type = decltype(*begin);
+            using func_type = std::function<void(const obj_type&)>;
+            return co_bind(co_foreach_impl<ForwardIterator, obj_type>, begin, end, func_type(func), yield_result);
+        }
+
+#if defined (CPPCOSL_IMPLEMENTATION)
+        co_declare_args(co_timer_impl, std::function<void()> func, float period, int repetitions)
+        {
+            co_local<int> i;
+
+            co_begin();
+
+            if (repetitions == 0)
+            {
+                while (true)
+                {
+                    func();
+                    yield_return(wait_for_seconds(period));
+                }
+            }
+            else
+            {
+                for(i = 0; i < repetitions; i++)
+                {
+                    func();
+                    yield_return(wait_for_seconds(period));
+                }
+            }
+
+            yield_break();
+        }
+
+        coroutine co_timer(std::function<void()> func, float period, int repetitions)
+        {
+            return co_bind(co_timer_impl, func, period, repetitions);
+        }
+
+#endif //CPPCOSL_IIMPLEMENTATION
+    }
 }
 
 #endif //CPPCOSL_INCLUDE_CPPCOSL_H
