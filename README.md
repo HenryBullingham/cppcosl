@@ -1,12 +1,16 @@
 # Coroutines for C++ using setjmp/longjmp
 
 Coroutines are co-operatively scheduled user space threads. Normally, they require operating system support to implement, but this library shows how to implement them using the functionality of C's setjmp & longjmp functions
+cppcosl is a header-only library.
 
 ## Usage:
 
 ``` C++
 
+//Define the implementation in one file
+#define CPPCOSL_IMPLEMENTATION
 #include "cppcosl/cppcosl.hpp"
+#include <iostream>
 
 //Declaring a coroutine
 co_declare(my_coroutine)
