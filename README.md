@@ -15,7 +15,7 @@ cppcosl is a header-only library.
 //Declaring a coroutine
 co_declare(my_coroutine)
 {
-    //Because of how seetjmp & longjmp work, we need special local variable containers
+    //Because of how setjmp & longjmp work, we need special local variable containers
     cppcosl::co_local<int> i;
 
     //Import coroutine functionality here
@@ -27,7 +27,7 @@ co_declare(my_coroutine)
 
         //Yield the coroutine and wait 0.5 seconds to be scheduled again
         yield_return(cppcosl::wait_for_seconds(0.5f));
-		}
+    }
 
     //Return from the coroutine
     yield_break();
