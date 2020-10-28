@@ -50,7 +50,7 @@ co_declare_args(count_down_n, int n)
     for (j = n; j >= 0; j--)
     {
         std::cout << "j = " << j << std::endl;
-        yield_return(cppcosl::wait_for_seconds(1.0f));
+        yield_return(cppcosl::wait_for_seconds(0.25f));
     }
     yield_break();
 }
@@ -90,9 +90,9 @@ co_declare(sequential_foreach)
 
     std::cout << "Sequential Foreach" << std::endl;
 
-    yield_call(cppcosl::lib::co_foreach(vec->begin(), vec->end(), [](const std::pair<int, char>& p) { std::cout << p.first << std::endl; }, cppcosl::wait_for_seconds(0.25f)));
+    yield_call(cppcosl::lib::co_foreach(vec->begin(), vec->end(), [](const std::pair<int, char>& p) { std::cout << p.first << std::endl; }, cppcosl::wait_for_seconds(0.1f)));
 
-    yield_call(cppcosl::lib::co_foreach(vec->begin(), vec->end(), [](const std::pair<int, char>& p) { std::cout << p.second << std::endl; }, cppcosl::wait_for_seconds(0.35f)));
+    yield_call(cppcosl::lib::co_foreach(vec->begin(), vec->end(), [](const std::pair<int, char>& p) { std::cout << p.second << std::endl; }, cppcosl::wait_for_seconds(0.1f)));
 
     yield_break();
 }

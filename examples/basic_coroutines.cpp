@@ -39,6 +39,8 @@ co_declare_args(count_to_n, int n)
         yield_return(cppcosl::wait_for_seconds(1.0f));
     }
 
+    std::cout << "finished count to n";
+
     yield_break();
 }
 
@@ -58,6 +60,8 @@ co_declare_args(count_to_c, char c)
         yield_return(cppcosl::wait_for_seconds(1.0f));
     }
 
+    std::cout << "finished count to c";
+
     yield_break();
 }
 
@@ -72,14 +76,16 @@ int main(int argc, char ** argv)
     cppcosl::co_wait(handle);
 
     cppcosl::co_handle handle1 = cppcosl::co_start(co_bind(count_to_n, 13));
-    cppcosl::co_handle handle2 = cppcosl::co_start(co_bind(count_to_c, 'a' + 13));
+    cppcosl::co_handle handle2 = cppcosl::co_start(co_bind(count_to_c, (char)('a' + 13)));
 
-    cppcosl::co_wait(handle);
+    cppcosl::co_wait(handle1);
     cppcosl::co_wait(handle2);
-
+    
     s_done = true;
 
     thread.join();
+
+    std::cout << "joined thread";
 
     return 0;
 }

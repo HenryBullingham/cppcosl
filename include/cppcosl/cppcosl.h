@@ -63,6 +63,7 @@ co_declare_args(my_coroutine_name, _type _name, _type2 _name2 ...) OR
 #if !defined(CPPCOSL_INCLUDE_CPPCOSL_H)
 #define CPPCOSL_INCLUDE_CPPCOSL_H
 
+#include <atomic>
 #include <csetjmp>
 #include <cstdint>
 #include <functional>
@@ -104,7 +105,7 @@ namespace cppcosl
     /// </summary>
     /// <param name="frames"></param>
     /// <returns></returns>
-    co_result wait_for_frames(int frames);
+    co_result wait_for_frames(int64_t frames);
 
     /// <summary>
     /// Yield the coroutine and wait until the given coroutine terminates
@@ -222,12 +223,24 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
 #define yield_call(_coroutine)\
 { \
     cppcosl::detail::make_context_current(&cppcosl_ctx.get_or_make_nested()); \
-    cppcosl::co_result cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 0); \
+    cppcosl::co_result cppcosl_co_ret;\
+    jmp_buf cppcosl_temp;/*We need this jump buf for extra levels of isolation*/\
+    int cppcosl_temp_ret = setjmp(cppcosl_temp);\
+    if (cppcosl_temp_ret == 0)\
+    {\
+        cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 0); \
+        longjmp(cppcosl_temp, 42);\
+    }\
     while(cppcosl_co_ret.type != cppcosl::detail::co_result_type::Done) \
     {\
         yield_return(cppcosl_co_ret);\
         cppcosl::detail::make_context_current(&cppcosl_ctx.get_or_make_nested()); \
-        cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 1);\
+        cppcosl_temp_ret = setjmp(cppcosl_temp);\
+        if (cppcosl_temp_ret == 0)\
+        {\
+            cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 1); \
+            longjmp(cppcosl_temp, 42);\
+        }\
     }\
     cppcosl_ctx.clear_nested();\
 }
@@ -238,12 +251,24 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
 #define yield_call_args(_coroutine, ...)\
 { \
     cppcosl::detail::make_context_current(&cppcosl_ctx.get_or_make_nested()); \
-    cppcosl::co_result cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 0, __VA_ARGS__); \
+    cppcosl::co_result cppcosl_co_ret;\
+    jmp_buf cppcosl_temp;/*We need this jump buf for extra levels of isolation*/\
+    int cppcosl_temp_ret = setjmp(cppcosl_temp);\
+    if (cppcosl_temp_ret == 0)\
+    {\
+        cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 0, __VA_ARGS__); \
+        longjmp(cppcosl_temp, 42);\
+    }\
     while(cppcosl_co_ret.type != cppcosl::detail::co_result_type::Done) \
     {\
         yield_return(cppcosl_co_ret);\
         cppcosl::detail::make_context_current(&cppcosl_ctx.get_or_make_nested()); \
-        cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 1, __VA_ARGS__);\
+        cppcosl_temp_ret = setjmp(cppcosl_temp);\
+        if (cppcosl_temp_ret == 0)\
+        {\
+            cppcosl_co_ret = _coroutine(cppcosl_ctx.get_or_make_nested(), 1, __VA_ARGS__); \
+            longjmp(cppcosl_temp, 42);\
+        }\
     }\
     cppcosl_ctx.clear_nested();\
 }
@@ -315,7 +340,7 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
             float f_val;
             void* ptr_val;
             co_result_param() {}
-            co_result_param(int i) : i_val(i) {}
+            co_result_param(int64_t i) : i_val(i) {}
             co_result_param(float f) : f_val(f) {}
             co_result_param(void* ptr) : ptr_val(ptr) {}
         };
@@ -326,49 +351,54 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
         detail::co_result_type type;
         detail::co_result_param arg0;
     };
-
     namespace detail
     {
         /// <summary>
         /// Special return to denote coroutine has not started
         /// </summary>
         /// <returns></returns>
-        inline co_result uninit()
-        {
-            return { detail::co_result_type::Uninit };
-        }
+        co_result uninit();
 
         /// <summary>
         /// Special return to denote coroutine is finished
         /// </summary>
         /// <returns></returns>
-        inline co_result done()
+        co_result done();
+    }
+#if defined(CPPCOSL_IMPLEMENTATION)
+    namespace detail
+    {
+        co_result uninit()
+        {
+            return { detail::co_result_type::Uninit };
+        }
+
+        co_result done()
         {
             return { detail::co_result_type::Done };
         }
     }
 
-
-    inline co_result wait_for_seconds(float seconds)
+    co_result wait_for_seconds(float seconds)
     {
         return { detail::co_result_type::WaitForSeconds, seconds };
     }
 
-    inline co_result wait_for_frames(int frames)
+    co_result wait_for_frames(int64_t frames)
     {
-        return { detail::co_result_type::WaitForSeconds, frames };
+        return { detail::co_result_type::WaitForFrames, frames };
     }
 
-    inline co_result wait_for_coroutine(co_handle routine)
+    co_result wait_for_coroutine(co_handle routine)
     {
         return { detail::co_result_type::WaitForCoroutine, (void*)routine.get() };
     }
 
-    inline co_result yield()
+    co_result yield()
     {
         return { detail::co_result_type::Yield };
     }
-
+#endif
     namespace detail
     {
         /*
@@ -494,7 +524,7 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
             m_nested->clear();
         }
 
-        jmp_buf& co_context::get_jmp_buf()
+        inline jmp_buf& co_context::get_jmp_buf()
         {
             return m_buf;
         }
@@ -662,12 +692,14 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
         {
             coroutine function;
             co_context context;
-            int status = 0;
-            bool done = false;
+            volatile int status = 0;
+            std::atomic<bool> done;
 
             co_result last_result = uninit();
-            int64_t next_frame = 0;
-            float next_time = 0;
+            volatile int64_t next_frame = 0;
+            volatile float next_time = 0;
+
+            co_block() { done.store(false); }
         };
     }
 
@@ -687,7 +719,7 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
         static std::vector<co_handle> s_scheduled_coroutines;
     }
 
-    static co_handle co_start(coroutine co)
+    co_handle co_start(coroutine co)
     {
         std::shared_ptr<detail::co_block> block = std::make_shared<detail::co_block>();
         block->function = co;
@@ -752,6 +784,11 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
             return false;
         }
 
+        co_result process_coroutine(coroutine co, co_context& ctx, int status)
+        {
+            return co(ctx, status);
+        }
+
         /// <summary>
         /// Processes all running coroutines and all scheduled coroutines once.
         /// </summary>
@@ -766,40 +803,58 @@ cppcosl::co_result _funcname(cppcosl::detail::co_context& cppcosl_ctx, int cppco
                 s_scheduled_coroutines.resize(0);
             }
             //Run the coroutines
-            for (auto block : s_running_coroutines)
+            for (auto& block_ref : s_running_coroutines)
             {
+                auto block = block_ref;
                 if (!can_run(*block, frame))
                 {
                     continue;
                 }
-
+                auto ptr = block;
                 block->context.reset();
                 make_context_current(&block->context);
                 //This line is the most important line.
                 //It calls the coroutine, and must only be called in one spot,
                 //And the EXACT SAME SPOT in the call hierarchy EVERY TIME
-                block->last_result = block->function(block->context, block->status);
-                block->status = 1;
-                switch (block->last_result.type)
+
+                //We have an extra setjmp / longjump here,
+                //Because it seems that the setjmp/longjmp in the coroutines messes with the registers used by calling functions
+                //So, we save the context to process the block and then restore it
+                jmp_buf temp_buf;
+                int r = setjmp(temp_buf);
+                if (r == 0)
                 {
-                case co_result_type::Done:
-                    block->done = true;
-                    break;
-                case co_result_type::WaitForFrames:
-                    block->next_frame = frame + block->last_result.arg0.i_val;
-                    break;
-                case co_result_type::WaitForSeconds:
-                    block->next_time = get_current_time() + block->last_result.arg0.f_val;
-                    break;
-                case co_result_type::WaitForCoroutine: // Do nothing
-                case co_result_type::Yield: // Do nothing
-                    break;
+                    co_result result = process_coroutine(block->function, block->context, block->status);
+                    block->last_result = result;
+                    block->status = 1;
+                    switch (block->last_result.type)
+                    {
+                    case co_result_type::Done:
+                        block->done.store(true);
+                        break;
+                    case co_result_type::WaitForFrames:
+                        block->next_frame = frame + block->last_result.arg0.i_val;
+                        break;
+                    case co_result_type::WaitForSeconds:
+                        block->next_time = get_current_time() + block->last_result.arg0.f_val;
+                        break;
+                    case co_result_type::WaitForCoroutine: // Do nothing
+                    case co_result_type::Yield: // Do nothing
+                        break;
+                    }
+
+                    longjmp(temp_buf, 7);
                 }
             }
+
+            //std::cout << "Done Processing!" << std::endl;
+
             s_running_coroutines.erase(
-                std::remove_if(s_running_coroutines.begin(), s_running_coroutines.end(), [](std::shared_ptr<co_block> block) { return block->done; }), 
+                std::remove_if(s_running_coroutines.begin(), s_running_coroutines.end(), [&](std::shared_ptr<co_block> block) { return block->done.load(); }), 
                 s_running_coroutines.end()
             );
+
+            //std::cout << "Done Removing!" << std::endl;
 
             frame++;
         }
