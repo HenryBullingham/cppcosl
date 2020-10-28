@@ -1,39 +1,49 @@
-# Dependency Injection for C++ (cppdj)
+# Coroutines for C++ using setjmp/longjmp
 
-Dependency Injection is a useful testing / decoupling mechanism in other languages / platforms.
-cppdi is a small header-only dependency injection module
+Coroutines are co-operatively scheduled user space threads. Normally, they require operating system support to implement, but this library shows how to implement them using the functionality of C's setjmp & longjmp functions
 
 ## Usage:
 
 ``` C++
 
-#include "cppdj/cppdj.hpp"
+#include "cppcosl/cppcosl.hpp"
 
-struct foo
+//Declaring a coroutine
+co_declare(my_coroutine)
 {
-    void do_something();
-}
+    //Because of how seetjmp & longjmp work, we need special local variable containers
+    cppcosl::co_local<int> i;
 
-struct bar
-{
-    cppdj::dep<foo> m_foo; //Automatically injected on construction
+    //Import coroutine functionality here
+    co_begin();
 
-    void do_other_thing()
+    for (i = 0; i < 10; i++)
     {
-		    m_foo->do_something();
-    }
+        std::cout << i << std::endl;
+
+        //Yield the coroutine and wait 0.5 seconds to be scheduled again
+        yield_return(cppcosl::wait_for_seconds(0.5f));
+		}
+
+    //Return from the coroutine
+    yield_break();
 }
+
 
 void main()
 {
-    //Register foo and bar (in order)
-    //Note: doesn't currently support constructor arg forwarding
-    cppdj::register_dep<foo>();
-    cppdj::register_dep<bar>();
+    //We need to initialize the library
+    bool done = false;
+    auto thread = cppcosl::cppcosl_start_thread([&]{return done});
 
-    //Get a bar
-    cppdj::dep<bar> the_bar;
-    the_bar->do_other_thing(); //Will call the foo do_something()
+    auto handle = cppcosl::co_start(my_coroutine);
+
+    cppcosl::co_wait(my_coroutine);
+
+    //Let the library know we are done
+    done = true;
+
+    thread.join();
 }
 
 ```
